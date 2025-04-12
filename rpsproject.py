@@ -6,6 +6,7 @@ import time
 def get_hand_gesture(contour, hull, defects):
     if defects is None:
         return "Rock", 0
+
     finger_count = 0
     for i in range(defects.shape[0]):
         s, e, f, d = defects[i, 0]
@@ -17,8 +18,7 @@ def get_hand_gesture(contour, hull, defects):
         c = np.linalg.norm(np.array(end) - np.array(far))
         angle = np.arccos((b**2 + c**2 - a**2)/(2*b*c))
 
-        # Improved detection with angle and depth threshold
-        if angle <= 1.5 and d > 10000:
+        if angle <= np.pi / 1.2 and d > 6000:
             finger_count += 1
 
     if finger_count == 0:
@@ -54,7 +54,6 @@ def countdown_animation(frame_width, frame_height):
         cv2.imshow("Rock Paper Scissors", frame)
         cv2.waitKey(1000)
 
-# Your setup values
 cap = cv2.VideoCapture(0)
 frame_width = 1080
 frame_height = 720
@@ -66,7 +65,6 @@ y1 = center_y - roi_size // 2
 x2 = x1 + roi_size
 y2 = y1 + roi_size
 
-# Game state
 last_result = ""
 ai_move = ""
 user_move = ""
@@ -75,6 +73,8 @@ last_time = 0
 player_score = 0
 ai_score = 0
 rounds_played = 0
+max_rounds = 5
+
 started = False
 show_instructions = False
 game_started = False
@@ -88,8 +88,8 @@ try:
         frame = cv2.resize(frame, (frame_width, frame_height))
         key = cv2.waitKey(1)
 
-        if player_score == 3 or ai_score == 3:
-            winner = "You Win!" if player_score == 3 else "AI Wins!"
+        if player_score == 3 or ai_score == 3 or rounds_played >= max_rounds:
+            winner = "You Win!" if player_score > ai_score else "AI Wins!" if ai_score > player_score else "It's a Draw!"
             frame[:] = (0, 0, 0)
             cv2.putText(frame, "GAME OVER", (350, 200), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 255), 5)
             cv2.putText(frame, winner, (420, 300), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 4)
@@ -157,15 +157,16 @@ try:
                 break
             continue
 
-        cv2.putText(frame, "Put hand in box. Press 'q' to quit.", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (80, 80, 80), 2)
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
         blur = cv2.GaussianBlur(gray, (35, 35), 0)
         _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
+        feedback_text = ""
         if contours:
             contour = max(contours, key=cv2.contourArea)
-            if cv2.contourArea(contour) > 5000:
+            area = cv2.contourArea(contour)
+            if area > 5000:
                 hull = cv2.convexHull(contour)
                 defects = cv2.convexityDefects(contour, cv2.convexHull(contour, returnPoints=False))
                 user_move, finger_count = get_hand_gesture(contour, hull, defects)
@@ -176,12 +177,14 @@ try:
                         player_score += 1
                     elif last_result == "AI Wins!":
                         ai_score += 1
-                    last_time = cv2.getTickCount()
                     rounds_played += 1
+                    last_time = cv2.getTickCount()
             else:
+                feedback_text = "Too small"
                 user_move = "Invalid"
                 finger_count = 0
         else:
+            feedback_text = "No hand detected"
             user_move = "Invalid"
             finger_count = 0
 
@@ -192,7 +195,12 @@ try:
         cv2.putText(frame, f"AI: {ai_move}", (30, base_y + line_height), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), 2)
         cv2.putText(frame, f"Result: {last_result}", (30, base_y + 2 * line_height), cv2.FONT_HERSHEY_SIMPLEX, font_scale + 0.1, (0, 0, 255), 2)
         cv2.putText(frame, f"Fingers: {finger_count}", (30, base_y + 3 * line_height), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (128, 0, 128), 2)
-        cv2.putText(frame, f"Score - You: {player_score} | AI: {ai_score}", (30, base_y + 4 * line_height), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (50, 100, 255), 2)
+        cv2.putText(frame, f"Score — You: {player_score} | AI: {ai_score}", (30, base_y + 4 * line_height), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (50, 100, 255), 2)
+
+        if feedback_text:
+            feedback_size = cv2.getTextSize(feedback_text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)[0]
+            feedback_x = (frame_width - feedback_size[0]) // 2
+            cv2.putText(frame, feedback_text, (feedback_x, y2 + 40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)
 
         cv2.imshow("Rock Paper Scissors", frame)
         cv2.namedWindow("Threshold", cv2.WINDOW_NORMAL)
