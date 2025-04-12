@@ -2,11 +2,15 @@ import cv2
 import numpy as np
 import random
 import time
-import os
 
 def get_hand_gesture(contour, hull, defects):
-    if defects is None:
+    if defects is None or len(contour) == 0:
         return "Rock", 0
+
+    area = cv2.contourArea(contour)
+    if area < 5000:
+        return "Rock", 0
+
     finger_count = 0
     for i in range(defects.shape[0]):
         s, e, f, d = defects[i, 0]
@@ -17,13 +21,14 @@ def get_hand_gesture(contour, hull, defects):
         b = np.linalg.norm(np.array(far) - np.array(start))
         c = np.linalg.norm(np.array(end) - np.array(far))
         angle = np.arccos((b**2 + c**2 - a**2)/(2*b*c))
-        if angle <= np.pi / 1.2 and d > 6000:
+        if angle < np.pi / 1.2 and d > 1000:
             finger_count += 1
-    if finger_count == 0:
+
+    if finger_count <= 1:
         return "Rock", finger_count
-    elif 1 <= finger_count <= 2:
+    elif 2 <= finger_count <= 3:
         return "Scissors", finger_count
-    elif finger_count >= 3:
+    elif finger_count >= 4:
         return "Paper", finger_count
     return "Invalid", finger_count
 
@@ -50,27 +55,18 @@ def countdown_animation(frame_width, frame_height):
         text_y = (frame_height + text_size[1]) // 2
         cv2.putText(frame, count, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 5)
         cv2.imshow("Rock Paper Scissors", frame)
-        cv2.waitKey(1000)
+        if cv2.waitKey(1000) & 0xFF == ord('q'):
+            break
+    cv2.waitKey(1)  # <-- Important: release the frozen screen
 
-# Create gesture folders
-os.makedirs("gestures/rock", exist_ok=True)
-os.makedirs("gestures/paper", exist_ok=True)
-os.makedirs("gestures/scissors", exist_ok=True)
-
-capture_mode = False
-gesture_label = None
-image_count = 0
-
+# ---- Main Setup ----
 cap = cv2.VideoCapture(0)
 frame_width = 1080
 frame_height = 720
 roi_size = 400
-center_x = frame_width // 2
-center_y = frame_height // 2
-x1 = center_x - roi_size // 2
-y1 = center_y - roi_size // 2
-x2 = x1 + roi_size
-y2 = y1 + roi_size
+x1 = (frame_width - roi_size) // 2
+y1 = (frame_height - roi_size) // 2
+x2, y2 = x1 + roi_size, y1 + roi_size
 
 last_result = ""
 ai_move = ""
@@ -90,69 +86,21 @@ try:
         ret, frame = cap.read()
         if not ret:
             break
+
         frame = cv2.flip(frame, 1)
         frame = cv2.resize(frame, (frame_width, frame_height))
         key = cv2.waitKey(1)
 
-        if player_score == 3 or ai_score == 3 or rounds_played >= max_rounds:
-            winner = "You Win!" if player_score > ai_score else "AI Wins!" if ai_score > player_score else "It's a Draw!"
-            frame[:] = (0, 0, 0)
-            cv2.putText(frame, "GAME OVER", (350, 200), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 255), 5)
-            cv2.putText(frame, winner, (420, 300), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 4)
-            cv2.putText(frame, "Press 'r' to restart or 'q' to quit", (240, 400), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
-            cv2.imshow("Rock Paper Scissors", frame)
-            if key == ord('r'):
-                player_score = ai_score = rounds_played = 0
-                user_move = ai_move = last_result = ""
-                started = show_instructions = game_started = False
-            elif key == ord('q'):
-                break
-            continue
-
-        if game_started:
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
-        roi = frame[y1:y2, x1:x2]
-        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(gray, (35, 35), 0)
-        _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-
-        if capture_mode and gesture_label:
-            filename = f"gestures/{gesture_label}/{gesture_label}_{image_count}.png"
-            cv2.imwrite(filename, thresh)
-            image_count += 1
-            cv2.putText(frame, f"Saved {gesture_label} #{image_count}", (30, 450),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
-
-        if key == ord('r'):
-            gesture_label = "rock"
-            capture_mode = True
-            image_count = 0
-        elif key == ord('p'):
-            gesture_label = "paper"
-            capture_mode = True
-            image_count = 0
-        elif key == ord('s'):
-            gesture_label = "scissors"
-            capture_mode = True
-            image_count = 0
-        elif key == ord('x'):
-            capture_mode = False
-            gesture_label = None
-
         if not started:
             title = "Rock Paper Scissors"
             subtitle = "Press 's' to Start"
-            title_scale = 1.8
-            subtitle_scale = 1.2
-            title_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, title_scale, 3)[0]
-            subtitle_size = cv2.getTextSize(subtitle, cv2.FONT_HERSHEY_SIMPLEX, subtitle_scale, 2)[0]
+            title_size = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 1.8, 3)[0]
+            subtitle_size = cv2.getTextSize(subtitle, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 2)[0]
             title_x = (frame_width - title_size[0]) // 2
             subtitle_x = (frame_width - subtitle_size[0]) // 2
             center_y = frame_height // 2
-            title_y = center_y - 40
-            subtitle_y = center_y + 40
-            cv2.putText(frame, title, (title_x, title_y), cv2.FONT_HERSHEY_SIMPLEX, title_scale, (0, 0, 0), 3)
-            cv2.putText(frame, subtitle, (subtitle_x, subtitle_y), cv2.FONT_HERSHEY_SIMPLEX, subtitle_scale, (0, 0, 255), 2)
+            cv2.putText(frame, title, (title_x, center_y - 40), cv2.FONT_HERSHEY_SIMPLEX, 1.8, (0, 0, 0), 3)
+            cv2.putText(frame, subtitle, (subtitle_x, center_y + 40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 2)
             cv2.imshow("Rock Paper Scissors", frame)
             if key == ord('s'):
                 started = True
@@ -177,27 +125,24 @@ try:
                 show_instructions = False
                 countdown_animation(frame_width, frame_height)
                 game_started = True
+                cv2.waitKey(1)  # <-- Fix for freeze after countdown
             elif key == ord('q'):
                 break
             continue
 
+        if game_started:
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
+
+        roi = frame[y1:y2, x1:x2]
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        blur = cv2.GaussianBlur(gray, (35, 35), 0)
+        _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+
         feedback_text = ""
         if contours:
             contour = max(contours, key=cv2.contourArea)
-            area = cv2.contourArea(contour)
-            if area > 100000:
-                feedback_text = "Too close"
-            elif area < 5000:
-                feedback_text = "Too far"
-            else:
-                M = cv2.moments(contour)
-                if M['m00'] != 0:
-                    cx = int(M['m10'] / M['m00'])
-                    cy = int(M['m01'] / M['m00'])
-                    if abs(cx - roi.shape[1] // 2) > 80:
-                        feedback_text = "Hand not centered"
-            if area > 5000:
+            if cv2.contourArea(contour) > 5000:
                 hull = cv2.convexHull(contour)
                 defects = cv2.convexityDefects(contour, cv2.convexHull(contour, returnPoints=False))
                 user_move, finger_count = get_hand_gesture(contour, hull, defects)
@@ -208,9 +153,10 @@ try:
                         player_score += 1
                     elif last_result == "AI Wins!":
                         ai_score += 1
-                    last_time = cv2.getTickCount()
                     rounds_played += 1
+                    last_time = cv2.getTickCount()
             else:
+                feedback_text = "Too small"
                 user_move = "Invalid"
                 finger_count = 0
         else:
@@ -218,24 +164,33 @@ try:
             user_move = "Invalid"
             finger_count = 0
 
-        base_y = 100
-        line_height = 40
-        font_scale = 0.8
-        cv2.putText(frame, f"You: {user_move}", (30, base_y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), 2)
-        cv2.putText(frame, f"AI: {ai_move}", (30, base_y + line_height), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), 2)
-        cv2.putText(frame, f"Result: {last_result}", (30, base_y + 2 * line_height), cv2.FONT_HERSHEY_SIMPLEX, font_scale + 0.1, (0, 0, 255), 2)
-        cv2.putText(frame, f"Fingers: {finger_count}", (30, base_y + 3 * line_height), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (128, 0, 128), 2)
-        cv2.putText(frame, f"Score — You: {player_score} | AI: {ai_score}", (30, base_y + 4 * line_height), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (50, 100, 255), 2)
+        cv2.putText(frame, f"You: {user_move}", (30, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
+        cv2.putText(frame, f"AI: {ai_move}", (30, 140), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
+        cv2.putText(frame, f"Result: {last_result}", (30, 180), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+        cv2.putText(frame, f"Fingers: {finger_count}", (30, 220), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (128, 0, 128), 2)
+        cv2.putText(frame, f"Score — You: {player_score} | AI: {ai_score}", (30, 260), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (50, 100, 255), 2)
 
         if feedback_text:
-            feedback_size = cv2.getTextSize(feedback_text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)[0]
-            feedback_x = (frame_width - feedback_size[0]) // 2
+            text_size = cv2.getTextSize(feedback_text, cv2.FONT_HERSHEY_SIMPLEX, 1.2, 3)[0]
+            feedback_x = (frame_width - text_size[0]) // 2
             cv2.putText(frame, feedback_text, (feedback_x, y2 + 40), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)
 
         cv2.imshow("Rock Paper Scissors", frame)
-        cv2.namedWindow("Threshold", cv2.WINDOW_NORMAL)
-        cv2.resizeWindow("Threshold", 400, 400)
         cv2.imshow("Threshold", thresh)
+
+        if player_score == 3 or ai_score == 3 or rounds_played >= 5:
+            winner = "You Win!" if player_score > ai_score else "AI Wins!" if ai_score > player_score else "It's a Draw!"
+            frame[:] = (0, 0, 0)
+            cv2.putText(frame, "GAME OVER", (350, 200), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 255), 5)
+            cv2.putText(frame, winner, (420, 300), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 255, 0), 4)
+            cv2.putText(frame, "Press 'r' to restart or 'q' to quit", (240, 400), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2)
+            cv2.imshow("Rock Paper Scissors", frame)
+            if key == ord('r'):
+                player_score = ai_score = rounds_played = 0
+                last_result = ai_move = user_move = ""
+                started = show_instructions = game_started = False
+            elif key == ord('q'):
+                break
 
         if key == ord('q'):
             break
