@@ -40,6 +40,19 @@ def get_winner(user, ai):
     else:
         return "AI Wins!"
 
+# ⏱ Countdown Animation
+def countdown_animation(frame_width, frame_height):
+    for count in ["3", "2", "1", "GO!"]:
+        frame = np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
+        color = (0, 0, 255) if count != "GO!" else (0, 255, 0)
+        font_scale = 4 if count != "GO!" else 3
+        text_size = cv2.getTextSize(count, cv2.FONT_HERSHEY_SIMPLEX, font_scale, 5)[0]
+        text_x = (frame_width - text_size[0]) // 2
+        text_y = (frame_height + text_size[1]) // 2
+        cv2.putText(frame, count, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, 5)
+        cv2.imshow("Rock Paper Scissors (No MediaPipe)", frame)
+        cv2.waitKey(1000)  # 1 second per frame
+
 # Setup
 cap = cv2.VideoCapture(0)
 last_result = ""
@@ -110,13 +123,14 @@ try:
 
             key = cv2.waitKey(1)
             if key == ord('n'):
-                game_started = True
                 show_instructions = False
+                countdown_animation(frame_width, frame_height)  # 👈 Countdown runs here
+                game_started = True
             elif key == ord('q'):
                 break
             continue
 
-        # Game play starts
+        # Game play
         cv2.putText(frame, "Put hand in box. Press 'q' to quit.", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (80, 80, 80), 2)
 
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
