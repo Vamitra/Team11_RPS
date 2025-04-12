@@ -1,11 +1,11 @@
 import cv2
 import numpy as np
 import random
+import time
 
 def get_hand_gesture(contour, hull, defects):
     if defects is None:
-        return "Rock"
-
+        return "Rock", 0
     finger_count = 0
     for i in range(defects.shape[0]):
         s, e, f, d = defects[i, 0]
@@ -16,17 +16,16 @@ def get_hand_gesture(contour, hull, defects):
         b = np.linalg.norm(np.array(far) - np.array(start))
         c = np.linalg.norm(np.array(end) - np.array(far))
         angle = np.arccos((b**2 + c**2 - a**2)/(2*b*c))
-
-        if angle <= np.pi / 2:
+        if angle <= 1.3:
             finger_count += 1
-
+    print(f"Detected finger count: {finger_count}")
     if finger_count == 0:
-        return "Rock"
-    elif 1 <= finger_count <= 2:
-        return "Scissors"
+        return "Rock", finger_count
+    elif finger_count == 1 or finger_count == 2:
+        return "Scissors", finger_count
     elif finger_count >= 3:
-        return "Paper"
-    return "Unknown"
+        return "Paper", finger_count
+    return "Invalid", finger_count
 
 def get_ai_move():
     return random.choice(["Rock", "Paper", "Scissors"])
@@ -41,54 +40,139 @@ def get_winner(user, ai):
     else:
         return "AI Wins!"
 
+# Setup
 cap = cv2.VideoCapture(0)
 last_result = ""
 ai_move = ""
 user_move = ""
+finger_count = 0
 last_time = 0
+player_score = 0
+ai_score = 0
+rounds_played = 0
+
+log_file = open("game_log.txt", "a")
+
+# ROI setup
+frame_width = 1080
+frame_height = 720
+roi_size = 300
+center_x = frame_width // 2
+center_y = frame_height // 2
+x1 = center_x - roi_size // 2
+y1 = center_y - roi_size // 2
+x2 = x1 + roi_size
+y2 = y1 + roi_size
+
+# Control flags
+started = False
+show_instructions = False
+game_started = False
 
 try:
     while True:
         ret, frame = cap.read()
         if not ret:
             break
-
         frame = cv2.flip(frame, 1)
-        roi = frame[100:400, 100:400]
-        cv2.rectangle(frame, (100, 100), (400, 400), (255, 0, 0), 2)
+        frame = cv2.resize(frame, (frame_width, frame_height))
+
+        # Draw blue box only during gameplay
+        if game_started:
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
+
+        roi = frame[y1:y2, x1:x2]
+
+        # Start screen
+        if not started:
+            cv2.putText(frame, "Press 's' to Start", (350, 650), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 3)
+            cv2.namedWindow("Rock Paper Scissors (No MediaPipe)", cv2.WINDOW_NORMAL)
+            cv2.resizeWindow("Rock Paper Scissors (No MediaPipe)", frame_width, frame_height)
+            cv2.imshow("Rock Paper Scissors (No MediaPipe)", frame)
+
+            key = cv2.waitKey(1)
+            if key == ord('s'):
+                started = True
+                show_instructions = True
+            elif key == ord('q'):
+                break
+            continue
+
+        # Instructions screen
+        if show_instructions:
+            cv2.putText(frame, "Instructions", (400, 100), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (255, 255, 0), 3)
+            cv2.putText(frame, "- Put your hand inside the blue box", (100, 200), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
+            cv2.putText(frame, "- Make a gesture: Rock ✊, Paper ✋, or Scissors ✌️", (100, 250), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
+            cv2.putText(frame, "- AI will randomly choose and compare", (100, 300), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
+            cv2.putText(frame, "- You get 5 seconds to pose", (100, 350), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2)
+            cv2.putText(frame, "- Press 'n' to begin game", (100, 450), cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 0, 255), 3)
+            cv2.imshow("Rock Paper Scissors (No MediaPipe)", frame)
+
+            key = cv2.waitKey(1)
+            if key == ord('n'):
+                game_started = True
+                show_instructions = False
+            elif key == ord('q'):
+                break
+            continue
+
+        # Game play starts
+        cv2.putText(frame, "Put hand in box. Press 'q' to quit.", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (80, 80, 80), 2)
 
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
         blur = cv2.GaussianBlur(gray, (35, 35), 0)
-        _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV+cv2.THRESH_OTSU)
+        _, thresh = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
         contours, _ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
         if contours:
             contour = max(contours, key=cv2.contourArea)
-
             if cv2.contourArea(contour) > 5000:
                 hull = cv2.convexHull(contour)
                 defects = cv2.convexityDefects(contour, cv2.convexHull(contour, returnPoints=False))
+                user_move, finger_count = get_hand_gesture(contour, hull, defects)
 
-                user_move = get_hand_gesture(contour, hull, defects)
-
-                if cv2.getTickCount() - last_time > cv2.getTickFrequency() * 2:
+                if cv2.getTickCount() - last_time > cv2.getTickFrequency() * 5:
                     ai_move = get_ai_move()
                     last_result = get_winner(user_move, ai_move)
+                    if last_result == "You Win!":
+                        player_score += 1
+                    elif last_result == "AI Wins!":
+                        ai_score += 1
+                    rounds_played += 1
+                    log_file.write(f"Round {rounds_played}: You - {user_move}, AI - {ai_move}, Result - {last_result}\n")
+                    log_file.flush()
                     last_time = cv2.getTickCount()
+            else:
+                user_move = "Invalid"
+                finger_count = 0
+        else:
+            user_move = "Invalid"
+            finger_count = 0
 
-        # Display
-        cv2.putText(frame, f"You: {user_move}", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,255,255), 2)
-        cv2.putText(frame, f"AI: {ai_move}", (10, 100), cv2.FONT_HERSHEY_SIMPLEX, 1, (100,255,100), 2)
-        cv2.putText(frame, f"Result: {last_result}", (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 1, (0,255,255), 2)
+        # Scoreboard
+        base_y = 100
+        line_height = 40
+        font_scale = 0.8
+        cv2.putText(frame, f"You: {user_move}", (30, base_y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), 2)
+        cv2.putText(frame, f"AI: {ai_move}", (30, base_y + line_height), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), 2)
+        cv2.putText(frame, f"Result: {last_result}", (30, base_y + 2 * line_height), cv2.FONT_HERSHEY_SIMPLEX, font_scale + 0.1, (0, 0, 255), 2)
+        cv2.putText(frame, f"Fingers: {finger_count}", (30, base_y + 3 * line_height), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (128, 0, 128), 2)
+        cv2.putText(frame, f"Score - You: {player_score} | AI: {ai_score}", (30, base_y + 4 * line_height), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (50, 100, 255), 2)
 
+        # Windows
+        cv2.namedWindow("Rock Paper Scissors (No MediaPipe)", cv2.WINDOW_NORMAL)
+        cv2.resizeWindow("Rock Paper Scissors (No MediaPipe)", frame_width, frame_height)
         cv2.imshow("Rock Paper Scissors (No MediaPipe)", frame)
+        cv2.namedWindow("Threshold", cv2.WINDOW_NORMAL)
+        cv2.resizeWindow("Threshold", 400, 400)
         cv2.imshow("Threshold", thresh)
 
-        # Exit key
         if cv2.waitKey(1) & 0xFF == ord('q'):
             print("Exiting the game...")
             break
+
 finally:
+    log_file.close()
     cap.release()
     cv2.destroyAllWindows()
